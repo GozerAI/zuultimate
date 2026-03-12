@@ -22,12 +22,7 @@ def serve(
 @app.command()
 def scan(text: str = typer.Argument(..., help="Text to scan for injection")):
     """Scan text for prompt injection threats."""
-    try:
-        from zuultimate.ai_security.injection_detector import InjectionDetector
-    except ImportError:
-        console.print("[red]AI Security module not available (Enterprise feature)[/]")
-        raise typer.Exit(1)
-
+    from zuultimate.ai_security.injection_detector import InjectionDetector
     detector = InjectionDetector()
     result = detector.scan(text)
 
@@ -49,14 +44,9 @@ def scan(text: str = typer.Argument(..., help="Text to scan for injection")):
 @app.command()
 def redteam(passphrase: str = typer.Option(..., prompt=True, hide_input=True)):
     """Run the red team attack suite."""
-    try:
-        from zuultimate.ai_security.red_team import RedTeamTool
-        from zuultimate.ai_security.injection_detector import InjectionDetector
-    except ImportError:
-        console.print("[red]AI Security module not available (Enterprise feature)[/]")
-        raise typer.Exit(1)
-
     import asyncio
+    from zuultimate.ai_security.red_team import RedTeamTool
+    from zuultimate.ai_security.injection_detector import InjectionDetector
 
     async def run():
         tool = RedTeamTool(InjectionDetector())

@@ -1,6 +1,6 @@
 """ZuulLicenseGate — feature entitlement checker for zuultimate.
 
-Same enforcement philosophy as LicenseGate:
+Same enforcement philosophy as ag3ntwerk LicenseGate:
 - No VINZY_LICENSE_KEY → community only (gated features blocked)
 - Key + entitled → allow
 - Key + NOT entitled → block

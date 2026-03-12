@@ -1,8 +1,8 @@
 """Identity SQLAlchemy models."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from zuultimate.common.models import (
@@ -24,6 +24,8 @@ class Tenant(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(20), default="active")  # active | suspended | cancelled
     stripe_customer_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     stripe_subscription_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    default_retention_days: Mapped[int] = mapped_column(Integer, default=365)
+    pii_fields_json: Mapped[str] = mapped_column(Text, default="[]")
 
 
 class ApiKey(Base, TimestampMixin):
@@ -107,6 +109,23 @@ class EmailVerificationToken(Base, TimestampMixin):
     used: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class AuthEvent(Base):
+    """Structured auth event for audit trail -- all identifiers are hashed."""
+
+    __tablename__ = "auth_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    event_type: Mapped[str] = mapped_column(String(50), index=True)
+    tenant_id_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    ip_hash: Mapped[str] = mapped_column(String(64))
+    user_agent_hash: Mapped[str] = mapped_column(String(16))
+    username_hash: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
 class UserSession(Base, TimestampMixin):
     __tablename__ = "user_sessions"
 
@@ -116,6 +135,8 @@ class UserSession(Base, TimestampMixin):
     )
     access_token_hash: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     refresh_token_hash: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    token_family: Mapped[str] = mapped_column(String(36), nullable=False, default=generate_uuid, index=True)
+    is_consumed: Mapped[bool] = mapped_column(Boolean, default=False)
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

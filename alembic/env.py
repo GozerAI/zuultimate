@@ -28,6 +28,8 @@ import zuultimate.pos.models  # noqa: F401
 import zuultimate.crm.models  # noqa: F401
 import zuultimate.backup_resilience.models  # noqa: F401
 import zuultimate.ai_security.models  # noqa: F401
+import zuultimate.identity.consent.models  # noqa: F401
+import zuultimate.identity.dsar.models  # noqa: F401
 
 config = context.config
 

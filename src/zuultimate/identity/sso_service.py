@@ -1,8 +1,10 @@
-"""SSO service -- OIDC/SAML provider management and authentication flow."""
+"""SSO service -- OIDC provider management and authentication flow with PKCE."""
 
+import base64
 import hashlib
 import json
 import os
+import time
 from urllib.parse import urlencode, urlparse
 
 import httpx
@@ -21,8 +23,17 @@ logger = get_logger(__name__)
 
 _DB_KEY = "identity"
 
+# Pending authorization states expire after 10 minutes.
+_STATE_TTL_SECONDS = 600
+
 
 class SSOService:
+    """Manages OIDC providers and authorization-code flow with PKCE."""
+
+    # In-memory store for pending auth states keyed by ``state`` value.
+    # Each entry holds {nonce, code_verifier, provider_id, created_at}.
+    _pending_states: dict[str, dict] = {}
+
     def __init__(self, db: DatabaseManager, settings: ZuulSettings):
         license_gate.gate("zul.sso.oidc", "SSO / OIDC")
         self.db = db
@@ -32,12 +43,15 @@ class SSOService:
             salt=(settings.mfa_salt + "-sso").encode(),
         )
 
+    # ------------------------------------------------------------------
+    # Encryption helpers
+    # ------------------------------------------------------------------
+
     def _encrypt_secret(self, plaintext: str) -> str:
-        """Encrypt a client secret and return a JSON envelope."""
+        """Encrypts a client secret and returns a JSON envelope."""
         if not plaintext:
             return ""
         ct, nonce, tag = encrypt_aes_gcm(plaintext.encode(), self._enc_key)
-        import base64
         return json.dumps({
             "ct": base64.b64encode(ct).decode(),
             "nonce": base64.b64encode(nonce).decode(),
@@ -45,12 +59,11 @@ class SSOService:
         })
 
     def _decrypt_secret(self, stored: str) -> str:
-        """Decrypt a stored client secret envelope."""
+        """Decrypts a stored client secret envelope."""
         if not stored:
             return ""
         try:
             envelope = json.loads(stored)
-            import base64
             ct = base64.b64decode(envelope["ct"])
             nonce = base64.b64decode(envelope["nonce"])
             tag = base64.b64decode(envelope["tag"])
@@ -59,8 +72,12 @@ class SSOService:
             # Backwards compat: treat as plaintext
             return stored
 
+    # ------------------------------------------------------------------
+    # Redirect-URI validation
+    # ------------------------------------------------------------------
+
     def _validate_redirect_uri(self, redirect_uri: str) -> None:
-        """Validate redirect_uri against allowed origins to prevent open redirects."""
+        """Validates redirect_uri against allowed origins to prevent open redirects."""
         parsed = urlparse(redirect_uri)
         origin = f"{parsed.scheme}://{parsed.netloc}"
         if origin not in self.settings.sso_allowed_redirect_origins:
@@ -68,6 +85,58 @@ class SSOService:
                 f"Redirect URI origin '{origin}' not in allowed list. "
                 f"Allowed: {self.settings.sso_allowed_redirect_origins}"
             )
+
+    # ------------------------------------------------------------------
+    # PKCE helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _generate_pkce() -> tuple[str, str]:
+        """Generates a PKCE code_verifier and S256 code_challenge pair."""
+        code_verifier = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b"=").decode()
+        digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
+        code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+        return code_verifier, code_challenge
+
+    # ------------------------------------------------------------------
+    # State management
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _purge_expired_states(cls) -> None:
+        """Removes expired pending states to prevent unbounded memory growth."""
+        now = time.monotonic()
+        expired = [
+            key for key, val in cls._pending_states.items()
+            if now - val["created_at"] > _STATE_TTL_SECONDS
+        ]
+        for key in expired:
+            del cls._pending_states[key]
+
+    @classmethod
+    def _store_state(cls, state: str, nonce: str, code_verifier: str, provider_id: str) -> None:
+        """Stores pending authorization state for later validation."""
+        cls._purge_expired_states()
+        cls._pending_states[state] = {
+            "nonce": nonce,
+            "code_verifier": code_verifier,
+            "provider_id": provider_id,
+            "created_at": time.monotonic(),
+        }
+
+    @classmethod
+    def _pop_state(cls, state: str) -> dict | None:
+        """Retrieves and removes pending state. Returns None if missing or expired."""
+        entry = cls._pending_states.pop(state, None)
+        if entry is None:
+            return None
+        if time.monotonic() - entry["created_at"] > _STATE_TTL_SECONDS:
+            return None
+        return entry
+
+    # ------------------------------------------------------------------
+    # Provider CRUD
+    # ------------------------------------------------------------------
 
     async def create_provider(
         self,
@@ -79,8 +148,9 @@ class SSOService:
         metadata_url: str = "",
         tenant_id: str | None = None,
     ) -> dict:
-        if protocol not in ("oidc", "saml"):
-            raise ValidationError("Protocol must be 'oidc' or 'saml'")
+        """Creates an OIDC provider record."""
+        if protocol != "oidc":
+            raise ValidationError("Protocol must be 'oidc'")
 
         async with self.db.get_session(_DB_KEY) as session:
             provider = SSOProvider(
@@ -98,6 +168,7 @@ class SSOService:
         return self._to_dict(provider)
 
     async def list_providers(self, tenant_id: str | None = None) -> list[dict]:
+        """Lists active OIDC providers, optionally filtered by tenant."""
         async with self.db.get_session(_DB_KEY) as session:
             stmt = select(SSOProvider).where(SSOProvider.is_active == True)
             if tenant_id:
@@ -107,6 +178,7 @@ class SSOService:
         return [self._to_dict(p) for p in providers]
 
     async def get_provider(self, provider_id: str) -> dict:
+        """Fetches a single provider by ID."""
         async with self.db.get_session(_DB_KEY) as session:
             result = await session.execute(
                 select(SSOProvider).where(SSOProvider.id == provider_id)
@@ -116,35 +188,58 @@ class SSOService:
                 raise NotFoundError("SSO provider not found")
         return self._to_dict(provider)
 
+    async def deactivate_provider(self, provider_id: str) -> dict:
+        """Deactivates a provider so it no longer appears in listings."""
+        async with self.db.get_session(_DB_KEY) as session:
+            result = await session.execute(
+                select(SSOProvider).where(SSOProvider.id == provider_id)
+            )
+            provider = result.scalar_one_or_none()
+            if provider is None:
+                raise NotFoundError("SSO provider not found")
+            provider.is_active = False
+        return {"id": provider_id, "is_active": False}
+
+    # ------------------------------------------------------------------
+    # OIDC authorization flow
+    # ------------------------------------------------------------------
+
     async def initiate_login(self, provider_id: str, redirect_uri: str) -> dict:
-        """Generate SSO login URL for the given provider."""
+        """Builds an OIDC authorization URL with PKCE and nonce."""
         self._validate_redirect_uri(redirect_uri)
         provider = await self.get_provider(provider_id)
-        state = os.urandom(16).hex()
 
-        if provider["protocol"] == "oidc":
-            params = {
-                "client_id": provider["client_id"],
-                "response_type": "code",
-                "scope": "openid email profile",
-                "redirect_uri": redirect_uri,
-                "state": state,
-            }
-            redirect_url = f"{provider['issuer_url']}/authorize?{urlencode(params)}"
-        else:
-            # SAML: redirect to IdP SSO URL
-            redirect_url = f"{provider['issuer_url']}/sso?SAMLRequest=placeholder&RelayState={state}"
+        state = os.urandom(16).hex()
+        nonce = os.urandom(16).hex()
+        code_verifier, code_challenge = self._generate_pkce()
+
+        # Store state for callback validation
+        self._store_state(state, nonce, code_verifier, provider_id)
+
+        params = {
+            "client_id": provider["client_id"],
+            "response_type": "code",
+            "scope": "openid email profile",
+            "redirect_uri": redirect_uri,
+            "state": state,
+            "nonce": nonce,
+            "code_challenge": code_challenge,
+            "code_challenge_method": "S256",
+        }
+        redirect_url = f"{provider['issuer_url']}/authorize?{urlencode(params)}"
 
         return {
             "redirect_url": redirect_url,
             "state": state,
+            "nonce": nonce,
             "provider_id": provider_id,
         }
 
     async def _exchange_code_for_tokens(
         self, provider: dict, code: str, redirect_uri: str = "",
+        code_verifier: str = "",
     ) -> dict:
-        """Exchange an authorization code at the provider's token endpoint.
+        """Exchanges an authorization code at the provider's token endpoint.
 
         Returns the parsed JSON body from the IdP (id_token, access_token, etc.).
         Raises ``ValidationError`` on HTTP or protocol failures.
@@ -167,6 +262,8 @@ class SSOService:
         }
         if redirect_uri:
             payload["redirect_uri"] = redirect_uri
+        if code_verifier:
+            payload["code_verifier"] = code_verifier
 
         async with httpx.AsyncClient(timeout=15.0) as client:
             try:
@@ -186,7 +283,7 @@ class SSOService:
 
     @staticmethod
     def _extract_user_info(token_body: dict) -> tuple[str, str, str]:
-        """Extract (email, username, display_name) from IdP token response.
+        """Extracts (email, username, display_name) from IdP token response.
 
         Supports:
         - ``id_token`` containing a JWT with email/name claims (OIDC standard)
@@ -199,13 +296,12 @@ class SSOService:
         username = token_body.get("preferred_username", "") or token_body.get("user", "")
         display_name = token_body.get("name", "")
 
-        # Try to decode id_token JWT payload (unverified — the server already
+        # Try to decode id_token JWT payload (unverified -- the server already
         # validated the code exchange, so the id_token is authentic).
         id_token = token_body.get("id_token", "")
         if id_token:
             try:
-                import base64
-                # JWT: header.payload.signature — decode payload
+                # JWT: header.payload.signature -- decode payload
                 parts = id_token.split(".")
                 if len(parts) >= 2:
                     padded = parts[1] + "=" * (4 - len(parts[1]) % 4)
@@ -214,24 +310,36 @@ class SSOService:
                     username = username or claims.get("preferred_username", "") or claims.get("sub", "")
                     display_name = display_name or claims.get("name", "")
             except Exception:
-                pass  # Graceful — use top-level fields
+                pass  # Graceful -- use top-level fields
 
         return email, username, display_name
 
     async def handle_callback(
         self, provider_id: str, code: str, state: str,
-        redirect_uri: str = "",
+        nonce: str = "", redirect_uri: str = "",
     ) -> dict:
-        """Handle the SSO callback — exchange code for tokens.
+        """Handles the SSO callback -- exchanges code for tokens with PKCE.
 
-        Performs a real OIDC authorization-code exchange against the provider's
-        token endpoint, extracts user info from the response, and issues
-        Zuultimate JWT tokens.
+        Validates the nonce against the stored pending state, sends the
+        code_verifier to the token endpoint, and issues Zuultimate JWT tokens.
         """
         provider = await self.get_provider(provider_id)
 
-        # Exchange authorization code with the IdP
-        token_body = await self._exchange_code_for_tokens(provider, code, redirect_uri)
+        # Retrieve and validate pending state
+        pending = self._pop_state(state)
+        code_verifier = ""
+        if pending:
+            # Validate nonce matches the one stored during initiate_login
+            if nonce and pending["nonce"] != nonce:
+                raise ValidationError(
+                    "Nonce mismatch -- possible replay attack"
+                )
+            code_verifier = pending["code_verifier"]
+
+        # Exchange authorization code with the IdP (include code_verifier for PKCE)
+        token_body = await self._exchange_code_for_tokens(
+            provider, code, redirect_uri, code_verifier=code_verifier,
+        )
         email, username, display_name = self._extract_user_info(token_body)
 
         if not email:
@@ -288,17 +396,6 @@ class SSOService:
             "user_id": user.id,
             "sso_provider": provider["name"],
         }
-
-    async def deactivate_provider(self, provider_id: str) -> dict:
-        async with self.db.get_session(_DB_KEY) as session:
-            result = await session.execute(
-                select(SSOProvider).where(SSOProvider.id == provider_id)
-            )
-            provider = result.scalar_one_or_none()
-            if provider is None:
-                raise NotFoundError("SSO provider not found")
-            provider.is_active = False
-        return {"id": provider_id, "is_active": False}
 
     @staticmethod
     def _to_dict(p: SSOProvider) -> dict:

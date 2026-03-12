@@ -82,7 +82,10 @@ async def get_current_user(
 
     async with db.get_session("identity") as session:
         result = await session.execute(
-            select(UserSession).where(UserSession.access_token_hash == token_hash)
+            select(UserSession).where(
+                UserSession.access_token_hash == token_hash,
+                UserSession.is_consumed == False,
+            )
         )
         if result.scalar_one_or_none() is None:
             raise HTTPException(status_code=401, detail="Session revoked or expired")
@@ -128,10 +131,7 @@ def require_access(resource: str, action: str) -> Callable:
         request: Request,
         user: dict = Depends(get_current_user),
     ) -> dict:
-        try:
-            from zuultimate.access.service import AccessService
-        except ImportError:
-            raise HTTPException(status_code=501, detail="Access control module not available")
+        from zuultimate.access.service import AccessService
 
         db = request.app.state.db
         svc = AccessService(db)

@@ -9,6 +9,8 @@ from argon2.exceptions import VerifyMismatchError
 
 _hasher = PasswordHasher()
 _ALGORITHM = "HS256"
+_ISSUER = "zuultimate"
+_AUDIENCE = "zuultimate-api"
 
 
 def hash_password(password: str) -> str:
@@ -31,9 +33,18 @@ def create_jwt(
     data["exp"] = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)
     data["iat"] = datetime.now(timezone.utc)
     data["jti"] = uuid.uuid4().hex
+    data["iss"] = _ISSUER
+    data["aud"] = _AUDIENCE
     return jwt.encode(data, secret_key, algorithm=_ALGORITHM)
 
 
 def decode_jwt(token: str, secret_key: str, verify_exp: bool = True) -> dict:
     options = {"verify_exp": verify_exp}
-    return jwt.decode(token, secret_key, algorithms=[_ALGORITHM], options=options)
+    return jwt.decode(
+        token,
+        secret_key,
+        algorithms=[_ALGORITHM],
+        options=options,
+        issuer=_ISSUER,
+        audience=_AUDIENCE,
+    )

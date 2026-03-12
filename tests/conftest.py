@@ -19,6 +19,16 @@ def _unlock_license_gate():
     with patch("zuultimate.common.licensing.license_gate.check_feature", return_value=True):
         yield
 
+
+@pytest.fixture(autouse=True)
+def _skip_pwned_check():
+    """Disable HIBP breach lookups during tests to avoid external network calls."""
+    with patch(
+        "zuultimate.identity.risk.pwned.PwnedPasswordChecker.check",
+        return_value=False,
+    ):
+        yield
+
 _IN_MEMORY = "sqlite+aiosqlite://"
 
 
@@ -38,13 +48,12 @@ def test_settings():
 async def test_db(test_settings):
     import zuultimate.identity.models  # noqa: F401
     import zuultimate.identity.phase2_models  # noqa: F401
-    try:
-        import zuultimate.access.models  # noqa: F401
-    except ImportError:
-        pass
+    import zuultimate.access.models  # noqa: F401
     import zuultimate.vault.models  # noqa: F401
     import zuultimate.common.webhooks  # noqa: F401
     import zuultimate.common.idempotency  # noqa: F401
+    import zuultimate.identity.consent.models  # noqa: F401
+    import zuultimate.identity.dsar.models  # noqa: F401
 
     db = DatabaseManager(test_settings)
     await db.init()

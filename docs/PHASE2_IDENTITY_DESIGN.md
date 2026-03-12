@@ -9,7 +9,7 @@
 
 Phase 1 identity answers **"who are you?"** (JWT/API key → User → Tenant) and **"what plan are you on?"** (PLAN_ENTITLEMENTS static mapping). This works for human users accessing web services.
 
-Phase 2 must answer **"what can this entity do right now, in this context?"** — supporting AI agents, service-to-service delegation, scoped temporary access, and fine-grained data shape enforcement. The GozerAI ecosystem has multiple AI agents, microservices, and external integrations that all need identity beyond username/password.
+Phase 2 must answer **"what can this entity do right now, in this context?"** — supporting AI agents, service-to-service delegation, scoped temporary access, and fine-grained data shape enforcement. The GozerAI ecosystem has 16 C-Suite agents, multiple microservices, and external integrations that all need identity beyond username/password.
 
 ---
 
@@ -52,7 +52,7 @@ A **CapabilityToken** represents a specific, scoped permission granted to an Ide
 CapabilityToken
 ├── id (UUID)
 ├── identity_token_id: str (FK)
-├── capability: str        # e.g., "vault:encrypt", "app:delegate:role", "data:read:trends"
+├── capability: str        # e.g., "vault:encrypt", "csuite:delegate:cmo", "data:read:trends"
 ├── resource_scope: str    # resource pattern (glob), e.g., "tenant/*/trends/*"
 ├── constraints: JSON      # additional limits: {max_calls: 100, ip_range: "10.0.0.0/8"}
 ├── granted_by: str        # identity_token_id of grantor
@@ -83,7 +83,7 @@ DataShape
 ├── created_at, updated_at
 ```
 
-**Why?** When an AI agent requests data, the system needs to know not just "can this agent access trends?" but "which fields of the trend data can this agent see, given its clearance level?" DataShape enables field-level access control and compliance (GDPR, SOC2).
+**Why?** When a C-Suite agent requests data, the system needs to know not just "can this agent access trends?" but "which fields of the trend data can this agent see, given its clearance level?" DataShape enables field-level access control and compliance (GDPR, SOC2).
 
 ### 3.4 PolicyDecision
 
@@ -173,7 +173,7 @@ Phase 1 auth remains the **authentication** layer. Phase 2 adds **authorization*
 
 ## 5. Agent Identity Flow
 
-When an AI agent needs to perform work:
+When a C-Suite agent needs to perform work:
 
 ```
 1. CoS receives task from user

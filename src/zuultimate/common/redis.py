@@ -122,6 +122,37 @@ class RedisManager:
         self._mem_counters[key].append(now)
         return True
 
+    # ── sliding-window count helpers ──
+
+    async def sliding_window_add(self, key: str, window_seconds: int) -> int:
+        """Record one event in a sliding window and return the current count.
+
+        Unlike ``rate_limit_check`` this always adds an entry and returns the
+        total count within the window so callers can implement graduated
+        scoring.
+        """
+        if self._available and self._redis:
+            return await self._redis_sw_add(key, window_seconds)
+        return self._mem_sw_add(key, window_seconds)
+
+    async def _redis_sw_add(self, key: str, window_seconds: int) -> int:
+        now = time.time()
+        cutoff = now - window_seconds
+        pipe = self._redis.pipeline()
+        pipe.zremrangebyscore(key, 0, cutoff)
+        pipe.zadd(key, {str(now): now})
+        pipe.zcard(key)
+        pipe.expire(key, window_seconds)
+        results = await pipe.execute()
+        return results[2]
+
+    def _mem_sw_add(self, key: str, window_seconds: int) -> int:
+        now = time.time()
+        cutoff = now - window_seconds
+        self._mem_counters[key] = [t for t in self._mem_counters[key] if t > cutoff]
+        self._mem_counters[key].append(now)
+        return len(self._mem_counters[key])
+
     # ── idempotency helpers ──
 
     async def get_idempotency(self, key: str) -> dict | None:

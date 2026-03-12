@@ -52,6 +52,9 @@ class ZuulSettings(BaseSettings):
     login_rate_limit: int = 10
     login_rate_window: int = 300  # seconds
 
+    # OIDC provider discovery URL (optional global default)
+    oidc_provider_url: str = ""
+
     # Service-to-service auth (Vinzy → Zuultimate)
     service_token: str = ""
 

@@ -39,6 +39,8 @@ async def lifespan(app: FastAPI):
     import zuultimate.vault.models  # noqa: F401
     import zuultimate.common.webhooks  # noqa: F401  -- webhook_configs, webhook_deliveries
     import zuultimate.common.idempotency  # noqa: F401  -- idempotency_records
+    import zuultimate.identity.consent.models  # noqa: F401
+    import zuultimate.identity.dsar.models  # noqa: F401
 
     await db.create_all()
 
@@ -200,6 +202,8 @@ def create_app() -> FastAPI:
     from zuultimate.plugins.router import router as plugins_router
     from zuultimate.common.webhook_router import router as webhook_router
     from zuultimate.identity.phase2_router import router as phase2_router
+    from zuultimate.identity.consent.router import router as consent_router
+    from zuultimate.identity.dsar.router import router as dsar_router
 
     v1.include_router(identity_router)
     v1.include_router(tenant_router)
@@ -207,6 +211,8 @@ def create_app() -> FastAPI:
     v1.include_router(plugins_router)
     v1.include_router(webhook_router)
     v1.include_router(phase2_router)
+    v1.include_router(consent_router)
+    v1.include_router(dsar_router)
 
     app.include_router(v1)
 

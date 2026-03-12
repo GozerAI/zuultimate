@@ -1,6 +1,6 @@
 """Integration tests for vault router endpoints."""
 
-from tests.integration.conftest import get_auth_headers
+from tests.integration.conftest import get_auth_headers, grant_admin_access
 
 
 async def test_encrypt_decrypt_roundtrip(integration_client):

@@ -50,7 +50,7 @@ class CapabilityToken(Base, TimestampMixin):
     )
     capability: Mapped[str] = mapped_column(
         String(255), nullable=False, index=True,
-    )  # e.g., "vault:encrypt", "app:delegate:role"
+    )  # e.g., "vault:encrypt", "csuite:delegate:cmo"
     resource_scope: Mapped[str] = mapped_column(
         String(500), nullable=False, default="*",
     )  # glob pattern, e.g., "tenant/*/trends/*"

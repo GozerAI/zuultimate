@@ -28,27 +28,12 @@ async def integration_client():
     app = create_app()
 
     import zuultimate.identity.models  # noqa: F401
-    try:
-        import zuultimate.access.models  # noqa: F401
-    except ImportError:
-        pass
+    import zuultimate.access.models  # noqa: F401
     import zuultimate.vault.models  # noqa: F401
-    try:
-        import zuultimate.pos.models  # noqa: F401
-    except ImportError:
-        pass
-    try:
-        import zuultimate.crm.models  # noqa: F401
-    except ImportError:
-        pass
-    try:
-        import zuultimate.backup_resilience.models  # noqa: F401
-    except ImportError:
-        pass
-    try:
-        import zuultimate.ai_security.models  # noqa: F401
-    except ImportError:
-        pass
+    import zuultimate.pos.models  # noqa: F401
+    import zuultimate.crm.models  # noqa: F401
+    import zuultimate.backup_resilience.models  # noqa: F401
+    import zuultimate.ai_security.models  # noqa: F401
     import zuultimate.common.webhooks  # noqa: F401
     import zuultimate.common.idempotency  # noqa: F401
 
@@ -87,3 +72,23 @@ async def get_auth_headers(client, username="testuser", password="password123"):
     )
     token = resp.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
+
+
+
+async def grant_admin_access(client, headers, user_id):
+    """Create a global allow-all policy so the test user passes require_access checks."""
+    from zuultimate.access.models import Policy
+    from zuultimate.common.models import generate_uuid
+
+    db = client._transport.app.state.db
+    async with db.get_session("identity") as session:
+        policy = Policy(
+            id=generate_uuid(),
+            name="test-admin-allow-all",
+            effect="allow",
+            resource_pattern="*",
+            action_pattern="*",
+            priority=1000,
+            role_id=None,
+        )
+        session.add(policy)

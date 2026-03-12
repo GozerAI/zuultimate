@@ -1,4 +1,4 @@
-"""SSO router -- OIDC/SAML provider management and login flow."""
+"""SSO router -- OIDC provider management and login flow."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
@@ -73,7 +73,13 @@ async def initiate_sso_login(
 async def sso_callback(body: SSOCallbackRequest, request: Request):
     svc = _get_service(request)
     try:
-        return await svc.handle_callback(body.provider_id, body.code, body.state)
+        return await svc.handle_callback(
+            body.provider_id,
+            body.code,
+            body.state,
+            nonce=body.nonce,
+            redirect_uri=body.redirect_uri,
+        )
     except ZuulError as e:
         raise HTTPException(status_code=e.status_code, detail=e.message)
 

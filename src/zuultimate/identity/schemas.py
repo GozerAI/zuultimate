@@ -87,23 +87,40 @@ class VerificationTokenResponse(BaseModel):
     expires_at: str = Field(..., description="Token expiry timestamp (ISO 8601)")
 
 
+class IntrospectRequest(BaseModel):
+    token: str = Field(..., description="Token to introspect")
+
+
+class IntrospectResponse(BaseModel):
+    active: bool = Field(..., description="Whether the token is currently valid")
+    sub: str | None = Field(default=None, description="Subject (user ID)")
+    username: str | None = Field(default=None, description="Username")
+    tenant_id: str | None = Field(default=None, description="Tenant ID")
+    token_type: str | None = Field(default=None, description="Token type (access/refresh)")
+    exp: int | None = Field(default=None, description="Expiration timestamp")
+    iat: int | None = Field(default=None, description="Issued-at timestamp")
+    jti: str | None = Field(default=None, description="Token unique identifier")
+    iss: str | None = Field(default=None, description="Issuer")
+    aud: str | None = Field(default=None, description="Audience")
+
+
 class SSOProviderCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255, description="Provider display name", examples=["Okta Production"])
-    protocol: str = Field(pattern=r"^(oidc|saml)$", description="SSO protocol ('oidc' or 'saml')", examples=["oidc"])
+    protocol: str = Field(pattern=r"^oidc$", description="SSO protocol (only 'oidc' supported)", examples=["oidc"])
     issuer_url: str = Field(min_length=1, max_length=500, description="Identity provider issuer URL", examples=["https://accounts.google.com"])
     client_id: str = Field(min_length=1, max_length=255, description="OAuth2 client ID", examples=["my-client-id"])
     client_secret: str = Field(default="", description="OAuth2 client secret")
-    metadata_url: str = Field(default="", description="OIDC discovery or SAML metadata URL")
+    metadata_url: str = Field(default="", description="OIDC discovery metadata URL")
     tenant_id: str | None = Field(default=None, description="Scope provider to a specific tenant")
 
 
 class SSOProviderResponse(BaseModel):
     id: str = Field(..., description="Provider UUID")
     name: str = Field(..., description="Provider display name")
-    protocol: str = Field(..., description="SSO protocol ('oidc' or 'saml')")
+    protocol: str = Field(..., description="SSO protocol")
     issuer_url: str = Field(..., description="Identity provider issuer URL")
     client_id: str = Field(..., description="OAuth2 client ID")
-    metadata_url: str | None = Field(default=None, description="Discovery/metadata URL")
+    metadata_url: str | None = Field(default=None, description="OIDC discovery URL")
     tenant_id: str | None = Field(default=None, description="Associated tenant ID")
     is_active: bool = Field(..., description="Whether provider is active")
 
@@ -111,6 +128,7 @@ class SSOProviderResponse(BaseModel):
 class SSOLoginInitResponse(BaseModel):
     redirect_url: str = Field(..., description="URL to redirect the user to for authentication")
     state: str = Field(..., description="CSRF state parameter")
+    nonce: str = Field(..., description="OIDC nonce for replay protection")
     provider_id: str = Field(..., description="SSO provider UUID")
 
 
@@ -118,6 +136,8 @@ class SSOCallbackRequest(BaseModel):
     provider_id: str = Field(..., description="SSO provider UUID")
     code: str = Field(..., description="Authorization code from IdP")
     state: str = Field(..., description="CSRF state parameter to verify")
+    nonce: str = Field(..., description="OIDC nonce to validate against stored value")
+    redirect_uri: str = Field(default="", description="Redirect URI used in authorization request")
 
 
 class TenantCreateRequest(BaseModel):

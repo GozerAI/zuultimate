@@ -9,6 +9,7 @@ from sqlalchemy import delete as sa_delete, select
 from zuultimate.common.config import ZuulSettings
 from zuultimate.common.database import DatabaseManager
 from zuultimate.common.exceptions import AuthenticationError, NotFoundError, ValidationError
+from zuultimate.common.models import generate_uuid
 from zuultimate.common.security import create_jwt, decode_jwt, hash_password, verify_password
 from zuultimate.identity.models import Credential, EmailVerificationToken, User, UserSession
 from zuultimate.identity.mfa_service import MFAService
@@ -23,7 +24,11 @@ class IdentityService:
         self.settings = settings
 
     def _make_token_pair(self, user: User) -> tuple[str, str]:
-        """Create access + refresh token pair."""
+        """Create access + refresh token pair.
+
+        Note: access token TTL should be kept short (max 15 min recommended)
+        to limit the window of a stolen token.
+        """
         base_claims = {
             "sub": user.id,
             "username": user.username,
@@ -52,11 +57,13 @@ class IdentityService:
                 raise NotFoundError("User not found")
 
             access_token, refresh_token = self._make_token_pair(user)
+            family = generate_uuid()
 
             user_session = UserSession(
                 user_id=user.id,
                 access_token_hash=hashlib.sha256(access_token.encode()).hexdigest(),
                 refresh_token_hash=hashlib.sha256(refresh_token.encode()).hexdigest(),
+                token_family=family,
             )
             session.add(user_session)
 
@@ -138,11 +145,13 @@ class IdentityService:
                 }
 
             access_token, refresh_token = self._make_token_pair(user)
+            family = generate_uuid()
 
             user_session = UserSession(
                 user_id=user.id,
                 access_token_hash=hashlib.sha256(access_token.encode()).hexdigest(),
                 refresh_token_hash=hashlib.sha256(refresh_token.encode()).hexdigest(),
+                token_family=family,
             )
             session.add(user_session)
 
@@ -172,6 +181,11 @@ class IdentityService:
         ).model_dump()
 
     async def refresh_token(self, refresh_token: str) -> dict:
+        """Rotate refresh token with reuse detection.
+
+        If a consumed refresh token is reused, invalidate all sessions in the
+        same token family to protect against token theft.
+        """
         try:
             payload = decode_jwt(refresh_token, self.settings.secret_key)
         except Exception:
@@ -186,8 +200,33 @@ class IdentityService:
 
         token_hash = hashlib.sha256(refresh_token.encode()).hexdigest()
 
+        # Phase 1: look up session and check for reuse
+        reuse_detected = False
         async with self.db.get_session(_DB_KEY) as session:
-            # Verify refresh token exists in DB
+            result = await session.execute(
+                select(UserSession).where(UserSession.refresh_token_hash == token_hash)
+            )
+            old_session = result.scalar_one_or_none()
+            if old_session is None:
+                raise AuthenticationError("Session not found or revoked")
+
+            if old_session.is_consumed:
+                # Reuse detected -- wipe the entire token family and commit
+                await session.execute(
+                    sa_delete(UserSession).where(
+                        UserSession.token_family == old_session.token_family
+                    )
+                )
+                reuse_detected = True
+
+        if reuse_detected:
+            raise AuthenticationError(
+                "Refresh token reuse detected \u2014 all sessions invalidated"
+            )
+
+        # Phase 2: rotate the token
+        async with self.db.get_session(_DB_KEY) as session:
+            # Re-fetch the session (new transaction)
             result = await session.execute(
                 select(UserSession).where(UserSession.refresh_token_hash == token_hash)
             )
@@ -203,16 +242,15 @@ class IdentityService:
             if user is None:
                 raise AuthenticationError("User no longer active")
 
-            # Rotate: delete old session, create new one
-            await session.execute(
-                sa_delete(UserSession).where(UserSession.id == old_session.id)
-            )
+            # Mark old session as consumed (keep it for reuse detection)
+            old_session.is_consumed = True
 
             new_access, new_refresh = self._make_token_pair(user)
             new_session = UserSession(
                 user_id=user.id,
                 access_token_hash=hashlib.sha256(new_access.encode()).hexdigest(),
                 refresh_token_hash=hashlib.sha256(new_refresh.encode()).hexdigest(),
+                token_family=old_session.token_family,
             )
             session.add(new_session)
 
@@ -231,7 +269,52 @@ class IdentityService:
                 )
             )
 
-    # ── Email verification ──
+    async def introspect_token(self, token: str) -> dict:
+        """Introspect a token and return its validity and claims."""
+        try:
+            payload = decode_jwt(token, self.settings.secret_key)
+        except Exception:
+            return {"active": False}
+
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        token_type = payload.get("type")
+
+        async with self.db.get_session(_DB_KEY) as session:
+            # Check session exists based on token type
+            if token_type == "access":
+                result = await session.execute(
+                    select(UserSession).where(
+                        UserSession.access_token_hash == token_hash
+                    )
+                )
+            elif token_type == "refresh":
+                result = await session.execute(
+                    select(UserSession).where(
+                        UserSession.refresh_token_hash == token_hash,
+                        UserSession.is_consumed == False,
+                    )
+                )
+            else:
+                return {"active": False}
+
+            db_session = result.scalar_one_or_none()
+            if db_session is None:
+                return {"active": False}
+
+        return {
+            "active": True,
+            "sub": payload.get("sub"),
+            "username": payload.get("username"),
+            "tenant_id": payload.get("tenant_id"),
+            "token_type": token_type,
+            "exp": payload.get("exp"),
+            "iat": payload.get("iat"),
+            "jti": payload.get("jti"),
+            "iss": payload.get("iss"),
+            "aud": payload.get("aud"),
+        }
+
+    # -- Email verification --
 
     async def create_verification_token(self, user_id: str) -> dict:
         """Create a verification token for the user's email."""
