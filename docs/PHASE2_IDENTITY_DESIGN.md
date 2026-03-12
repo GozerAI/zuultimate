@@ -52,7 +52,7 @@ A **CapabilityToken** represents a specific, scoped permission granted to an Ide
 CapabilityToken
 ├── id (UUID)
 ├── identity_token_id: str (FK)
-├── capability: str        # e.g., "vault:encrypt", "csuite:delegate:cmo", "data:read:trends"
+├── capability: str        # e.g., "vault:encrypt", "app:delegate:role", "data:read:trends"
 ├── resource_scope: str    # resource pattern (glob), e.g., "tenant/*/trends/*"
 ├── constraints: JSON      # additional limits: {max_calls: 100, ip_range: "10.0.0.0/8"}
 ├── granted_by: str        # identity_token_id of grantor
