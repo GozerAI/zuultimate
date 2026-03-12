@@ -38,7 +38,10 @@ def test_settings():
 async def test_db(test_settings):
     import zuultimate.identity.models  # noqa: F401
     import zuultimate.identity.phase2_models  # noqa: F401
-    import zuultimate.access.models  # noqa: F401
+    try:
+        import zuultimate.access.models  # noqa: F401
+    except ImportError:
+        pass
     import zuultimate.vault.models  # noqa: F401
     import zuultimate.common.webhooks  # noqa: F401
     import zuultimate.common.idempotency  # noqa: F401

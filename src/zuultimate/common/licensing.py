@@ -1,6 +1,6 @@
 """ZuulLicenseGate — feature entitlement checker for zuultimate.
 
-Same enforcement philosophy as ag3ntwerk LicenseGate:
+Same enforcement philosophy as LicenseGate:
 - No VINZY_LICENSE_KEY → community only (gated features blocked)
 - Key + entitled → allow
 - Key + NOT entitled → block
@@ -15,7 +15,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-PRICING_URL = "https://1450enterprises.com/pricing"
+PRICING_URL = "https://gozerai.com/pricing"
 
 _FEATURE_TIER_MAP = {
     # Pro (Tier 2)

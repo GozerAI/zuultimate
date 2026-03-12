@@ -28,12 +28,27 @@ async def integration_client():
     app = create_app()
 
     import zuultimate.identity.models  # noqa: F401
-    import zuultimate.access.models  # noqa: F401
+    try:
+        import zuultimate.access.models  # noqa: F401
+    except ImportError:
+        pass
     import zuultimate.vault.models  # noqa: F401
-    import zuultimate.pos.models  # noqa: F401
-    import zuultimate.crm.models  # noqa: F401
-    import zuultimate.backup_resilience.models  # noqa: F401
-    import zuultimate.ai_security.models  # noqa: F401
+    try:
+        import zuultimate.pos.models  # noqa: F401
+    except ImportError:
+        pass
+    try:
+        import zuultimate.crm.models  # noqa: F401
+    except ImportError:
+        pass
+    try:
+        import zuultimate.backup_resilience.models  # noqa: F401
+    except ImportError:
+        pass
+    try:
+        import zuultimate.ai_security.models  # noqa: F401
+    except ImportError:
+        pass
     import zuultimate.common.webhooks  # noqa: F401
     import zuultimate.common.idempotency  # noqa: F401
 

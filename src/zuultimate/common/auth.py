@@ -128,7 +128,10 @@ def require_access(resource: str, action: str) -> Callable:
         request: Request,
         user: dict = Depends(get_current_user),
     ) -> dict:
-        from zuultimate.access.service import AccessService
+        try:
+            from zuultimate.access.service import AccessService
+        except ImportError:
+            raise HTTPException(status_code=501, detail="Access control module not available")
 
         db = request.app.state.db
         svc = AccessService(db)
