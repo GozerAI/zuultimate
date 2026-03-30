@@ -1,0 +1,22 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: zuultimate-introspect
+  namespace: zuultimate
+  labels:
+    app: zuultimate-introspect
+spec:
+  scaleTargetRef:
+    name: zuultimate-introspect
+  minReplicaCount: 5
+  maxReplicaCount: 50
+  cooldownPeriod: 300
+  triggers:
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus:9090
+      metricName: identity_introspect_rps_per_pod
+      threshold: "8000"
+      query: |
+        sum(rate(identity_introspect_requests_total[2m]))
+        / count(kube_pod_status_ready{pod=~"zuultimate-introspect-.*"})

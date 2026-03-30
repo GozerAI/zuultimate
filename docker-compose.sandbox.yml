@@ -1,0 +1,64 @@
+# Sandbox environment — spin up zuultimate + vinzy-engine + dependencies
+# Usage: docker compose -f docker-compose.sandbox.yml up
+
+services:
+  zuultimate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      ZUUL_SECRET_KEY: sandbox-secret-change-in-production
+      ZUUL_ENVIRONMENT: sandbox
+      ZUUL_REDIS_URL: redis://redis:6379/0
+      ZUUL_IDENTITY_DB_URL: sqlite+aiosqlite:///./data/identity.db
+      ZUUL_SERVICE_TOKEN: sandbox-service-token
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  vinzy-engine:
+    build:
+      context: ../vinzy-engine
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8000"
+    environment:
+      VINZY_SECRET_KEY: sandbox-secret-change-in-production
+      VINZY_ZUULTIMATE_BASE_URL: http://zuultimate:8000
+      VINZY_ZUULTIMATE_SERVICE_TOKEN: sandbox-service-token
+    depends_on:
+      zuultimate:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  docs:
+    image: swaggerapi/swagger-ui
+    ports:
+      - "8080:8080"
+    environment:
+      SWAGGER_JSON: /spec/openapi.json
+    volumes:
+      - ./docs/api:/spec:ro
+    depends_on:
+      - zuultimate

@@ -1,0 +1,41 @@
+services:
+  zuultimate:
+    build: ..
+    container_name: zuultimate
+    env_file: ../.env
+    volumes:
+      - zuul_data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - webproxy
+      - backend
+
+  redis:
+    image: redis:7-alpine
+    container_name: zuul-redis
+    restart: unless-stopped
+    volumes:
+      - zuul_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - backend
+
+volumes:
+  zuul_data:
+  zuul_redis:
+
+networks:
+  webproxy:
+    external: true
+  backend:
+    external: true

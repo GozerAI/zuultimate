@@ -1,0 +1,95 @@
+version: "3.8"
+
+services:
+  zuultimate:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      ZUUL_SECRET_KEY: ${ZUUL_SECRET_KEY:-workforce-dev-secret-change-me}
+      ZUUL_REGION: us
+      ZUUL_REDIS_URL: redis://redis:6379/0
+      ZUUL_SERVICE_TOKEN: ${ZUUL_SERVICE_TOKEN:-workforce-service-token}
+    depends_on:
+      - redis
+
+  pop-us:
+    build:
+      context: src/pop
+    ports:
+      - "9000:9000"
+    environment:
+      POP_REGION: us
+      POP_ZUULTIMATE_URL: http://zuultimate:8000
+      POP_PORT: "9000"
+    depends_on:
+      - zuultimate
+
+  pop-eu:
+    build:
+      context: src/pop
+    ports:
+      - "9001:9000"
+    environment:
+      POP_REGION: eu
+      POP_ZUULTIMATE_URL: http://zuultimate:8000
+      POP_PORT: "9000"
+    depends_on:
+      - zuultimate
+
+  nginx-pop-us:
+    image: nginx:alpine
+    ports:
+      - "9443:443"
+    volumes:
+      - ./scripts/mock-pki/certs:/etc/nginx/certs:ro
+    depends_on:
+      - pop-us
+
+  nginx-pop-eu:
+    image: nginx:alpine
+    ports:
+      - "9444:443"
+    volumes:
+      - ./scripts/mock-pki/certs:/etc/nginx/certs:ro
+    depends_on:
+      - pop-eu
+
+  mock-pki:
+    build:
+      context: scripts/mock-pki
+      dockerfile: Dockerfile
+    ports:
+      - "9999:9999"
+    volumes:
+      - pki-data:/pki
+
+  mock-entra:
+    image: python:3.12-slim
+    ports:
+      - "9998:9998"
+    command: >
+      python -c "
+      from http.server import HTTPServer, BaseHTTPRequestHandler
+      import json
+      class Handler(BaseHTTPRequestHandler):
+          def do_POST(self):
+              self.send_response(200)
+              self.send_header('Content-Type', 'application/json')
+              self.end_headers()
+              self.wfile.write(json.dumps({'id_token': 'mock.jwt.token', 'access_token': 'mock'}).encode())
+          def do_GET(self):
+              self.send_response(200)
+              self.send_header('Content-Type', 'application/json')
+              self.end_headers()
+              self.wfile.write(json.dumps({'issuer': 'mock-entra'}).encode())
+      HTTPServer(('0.0.0.0', 9998), Handler).serve_forever()
+      "
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+volumes:
+  pki-data:

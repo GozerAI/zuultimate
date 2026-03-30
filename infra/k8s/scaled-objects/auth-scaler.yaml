@@ -1,0 +1,22 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: zuultimate-auth
+  namespace: zuultimate
+  labels:
+    app: zuultimate-auth
+spec:
+  scaleTargetRef:
+    name: zuultimate-auth
+  minReplicaCount: 10
+  maxReplicaCount: 200
+  cooldownPeriod: 300
+  triggers:
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus:9090
+      metricName: identity_auth_rps_per_pod
+      threshold: "800"
+      query: |
+        sum(rate(identity_auth_requests_total[2m]))
+        / count(kube_pod_status_ready{pod=~"zuultimate-auth-.*"})

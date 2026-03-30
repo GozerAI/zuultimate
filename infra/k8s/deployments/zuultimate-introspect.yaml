@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zuultimate-introspect
+  namespace: zuultimate
+  labels:
+    app: zuultimate-introspect
+spec:
+  selector:
+    matchLabels:
+      app: zuultimate-introspect
+  template:
+    metadata:
+      labels:
+        app: zuultimate-introspect
+    spec:
+      containers:
+      - name: zuultimate-introspect
+        image: zuultimate:latest
+        ports:
+        - containerPort: 8000
+        resources:
+          requests:
+            cpu: "1"
+            memory: "1Gi"
+          limits:
+            cpu: "2"
+            memory: "1.5Gi"
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        startupProbe:
+          httpGet:
+            path: /health/startup
+            port: 8000
+          failureThreshold: 18
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 8000
+          periodSeconds: 15
+        env:
+        - name: ZUUL_REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: zuultimate-secrets
+              key: redis-url
+        - name: ZUUL_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: zuultimate-secrets
+              key: secret-key
+        - name: ZUUL_IDENTITY_DB_URL
+          valueFrom:
+            secretKeyRef:
+              name: zuultimate-secrets
+              key: identity-db-url

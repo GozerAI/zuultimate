@@ -1,0 +1,13 @@
+zuultimate:
+  environment: development
+  log_level: INFO
+  api:
+    title: Zuultimate
+    version: 0.1.0
+    cors_origins:
+      - "http://localhost:3000"
+      - "http://localhost:8000"
+  ai_security:
+    max_audit_events: 10000
+    threat_score_threshold: 0.3
+    enable_redteam: false

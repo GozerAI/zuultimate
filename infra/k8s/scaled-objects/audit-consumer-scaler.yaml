@@ -1,0 +1,20 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: audit-consumer
+  namespace: zuultimate
+  labels:
+    app: audit-consumer
+spec:
+  scaleTargetRef:
+    name: audit-consumer
+  minReplicaCount: 2
+  maxReplicaCount: 20
+  cooldownPeriod: 120
+  triggers:
+  - type: kafka
+    metadata:
+      bootstrapServers: kafka:9092
+      consumerGroup: audit-writer
+      topic: identity.consumer.events
+      lagThreshold: "10000"
